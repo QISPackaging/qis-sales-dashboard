@@ -1,0 +1,5 @@
+{
+  "name": "qis-sales-dashboard",
+  "private": true,
+  "scripts": { "test": "node --test" }
+}
