@@ -12,6 +12,9 @@
     'Luke H Outbound', 'Allegra Outbound',
   ];
   const PENDING = 'Pending Source';
+  const INBOUND = new Set(['In Bound Email', 'In Bound Call', 'In Bound Order/PO', 'Pop Up Form', 'Online form Submission']);
+  const OUTBOUND = new Set(['Liam N Outbound', 'Jack N Outbound', 'Luke H Outbound', 'Allegra Outbound']);
+  const sourceType = (src) => (INBOUND.has(src) ? 'in' : OUTBOUND.has(src) ? 'out' : 'pend');
 
   let S = null; // { entries, targets, holidays(Set), roster, fyMonths }
 
@@ -215,7 +218,7 @@
     const link = (path, label) => `<a class="navlink ${active === path ? 'active' : ''}" href="#/${path}">${label}</a>`;
     return `<nav>
       <span class="brand"><img src="img/qis-logo.png" alt="QIS Packaging"></span>
-      ${link('dashboard', 'Dashboard')}${link('entries', 'Entries')}${link('new', 'Log a sale')}
+      ${link('dashboard', 'Dashboard')}${link('entries', 'Entries')}${link('new', 'Log a sale')}${link('reporting', 'Reporting')}
       <span class="who">${db.isDemo() ? '<b style="color:var(--warn)">preview data</b>' : 'Shared link'}</span>
     </nav>`;
   }
@@ -508,6 +511,96 @@
     });
   }
 
+  // ---------- reporting (lead source) ----------
+  function periodRange(period, asOf) {
+    const cur = p.monthOf(asOf);
+    if (period === 'week') { const { mon, sun } = p.weekBounds(asOf); return { start: mon, end: sun, label: `This week · Mon ${ddmm(mon)} – Sun ${ddmm(sun)}` }; }
+    if (period === 'lastmonth') { const lm = p.addMonths(cur, -1); return { start: p.monthStart(lm), end: p.monthEnd(lm), label: `Last month · ${monthLabel(lm)}` }; }
+    if (period === 'fytd') { return { start: C.FY_START, end: asOf, label: 'FY to date' }; }
+    return { start: p.monthStart(cur), end: asOf, label: `Month to date · ${monthLabel(cur)}` };
+  }
+
+  function renderReporting(q) {
+    const asOf = todayBrisbane();
+    const period = ['week', 'mtd', 'lastmonth', 'fytd'].includes(q.get('period')) ? q.get('period') : 'mtd';
+    const personFilter = q.get('person') || '';
+    const { start, end, label } = periodRange(period, asOf < C.FY_START ? C.FY_START : asOf);
+
+    let rows = S.entries.filter((e) => e.entry_date >= start && e.entry_date <= end);
+    if (personFilter) rows = rows.filter((e) => e.person === personFilter);
+
+    const groups = new Map();
+    for (const e of rows) {
+      const src = e.lead_source || PENDING;
+      const g = groups.get(src) || { src, revenue: 0, orders: 0, gpDollars: 0, revWithGp: 0 };
+      const rev = e.revenue_cents / 100;
+      g.revenue += rev; g.orders += 1;
+      if (e.gp_pct != null) { g.gpDollars += rev * e.gp_pct; g.revWithGp += rev; }
+      groups.set(src, g);
+    }
+    const list = [...groups.values()].map((g) => ({
+      ...g, type: sourceType(g.src),
+      avgGp: g.revWithGp > 0 ? g.gpDollars / g.revWithGp : null,
+      avgDeal: g.orders > 0 ? g.revenue / g.orders : 0,
+    })).sort((a, b) => b.revenue - a.revenue);
+
+    const tot = list.reduce((a, g) => ({
+      revenue: a.revenue + g.revenue, orders: a.orders + g.orders,
+      gpDollars: a.gpDollars + g.gpDollars, revWithGp: a.revWithGp + g.revWithGp,
+    }), { revenue: 0, orders: 0, gpDollars: 0, revWithGp: 0 });
+    const bucket = (t) => list.filter((g) => g.type === t).reduce((a, g) => ({ revenue: a.revenue + g.revenue, orders: a.orders + g.orders }), { revenue: 0, orders: 0 });
+    const inb = bucket('in'); const outb = bucket('out'); const pend = bucket('pend');
+    const share = (v) => (tot.revenue > 0 ? (v / tot.revenue * 100).toFixed(0) + '%' : '—');
+    const avgGpTot = tot.revWithGp > 0 ? tot.gpDollars / tot.revWithGp : null;
+    const maxRev = list.length ? list[0].revenue : 1;
+    const people = [...S.roster, TEAM_WIN];
+    const segBtn = (val, txt) => `<button data-period="${val}" class="${period === val ? 'on' : ''}">${txt}</button>`;
+
+    $('#app').innerHTML = `${navHtml('reporting')}
+    <header class="page"><div><p class="eyebrow">Sales Team</p><h1>Reporting — Lead Source</h1></div>
+      <div class="stamp">Where our won revenue comes from<br>Figures AUD ex-GST · as at ${dayLabel(asOf)}</div></header>
+    <div class="selectors">
+      <div><label>Period</label><span class="seg" id="periodseg">
+        ${segBtn('week', 'This week')}${segBtn('mtd', 'Month to date')}${segBtn('lastmonth', 'Last month')}${segBtn('fytd', 'FY to date')}
+      </span></div>
+      <div><label>Person</label><select id="repperson"><option value="">Everyone</option>
+        ${people.map((pp) => `<option ${pp === personFilter ? 'selected' : ''}>${esc(pp)}</option>`).join('')}</select></div>
+      <div style="align-self:center;color:var(--ink-soft);font-size:12.5px;padding-top:14px">${esc(label)}</div>
+    </div>
+    ${tot.orders === 0 ? `<div class="panel" style="margin-top:12px;color:var(--ink-soft)">No won sales in this period${personFilter ? ' for ' + esc(personFilter) : ''} yet.</div>` : `
+    <div class="tiles" style="margin-top:12px">
+      <div class="tile"><div class="k">Won</div><div class="v num">${fmt$(tot.revenue)}</div><div class="s num">${tot.orders} order${tot.orders === 1 ? '' : 's'}</div></div>
+      <div class="tile"><div class="k">Gross profit</div><div class="v num">${fmt$(tot.gpDollars)}</div><div class="s num">${avgGpTot == null ? '—' : (avgGpTot * 100).toFixed(1) + '% avg GP'}</div></div>
+      <div class="tile"><div class="k">Inbound</div><div class="v num">${share(inb.revenue)}</div><div class="s num">${fmt$(inb.revenue)} · ${inb.orders} orders</div></div>
+      <div class="tile"><div class="k">Outbound (rep-generated)</div><div class="v num">${share(outb.revenue)}</div><div class="s num">${fmt$(outb.revenue)} · ${outb.orders} orders</div></div>
+    </div>
+    <h2>Revenue by lead source</h2>
+    <div class="panel"><div class="bars">
+      ${list.map((g) => `<div class="barrow"><span class="lbl">${g.src === PENDING ? 'Pending Source' : esc(g.src)}</span>
+        <div class="bartrack"><div class="barfill ${g.type}" style="width:${Math.max(2, g.revenue / maxRev * 100)}%"></div></div>
+        <span class="barval">${fmt$(g.revenue)} · ${share(g.revenue)}</span></div>`).join('')}
+    </div><p style="margin:14px 0 0;font-size:12px" class="muted"><span class="chip in">Inbound</span> came to us · <span class="chip out">Outbound</span> rep-generated · <span class="chip pend">Pending</span> source not set</p></div>
+    <h2>Full breakdown</h2>
+    <div class="panel scroll"><table>
+      <tr><th class="left">Lead source</th><th>Type</th><th>Revenue</th><th>% of won</th><th>Orders</th><th>GP $</th><th>Avg GP%</th><th>Avg deal</th></tr>
+      ${list.map((g) => `<tr><td class="left">${g.src === PENDING ? '<span class="src-pending">Pending Source</span>' : esc(g.src)}</td>
+        <td><span class="chip ${g.type}">${g.type === 'in' ? 'Inbound' : g.type === 'out' ? 'Outbound' : '—'}</span></td>
+        <td class="num">${fmt$(g.revenue)}</td><td class="num">${share(g.revenue)}</td><td class="num">${g.orders}</td>
+        <td class="num">${g.revWithGp > 0 ? fmt$(g.gpDollars) : '—'}</td>
+        <td class="num">${g.avgGp == null ? '—' : (g.avgGp * 100).toFixed(1) + '%'}</td>
+        <td class="num">${fmt$(g.avgDeal)}</td></tr>`).join('')}
+      <tr class="team"><td class="left">TOTAL</td><td></td><td class="num">${fmt$(tot.revenue)}</td><td class="num">100%</td><td class="num">${tot.orders}</td>
+        <td class="num">${fmt$(tot.gpDollars)}</td><td class="num">${avgGpTot == null ? '—' : (avgGpTot * 100).toFixed(1) + '%'}</td>
+        <td class="num">${fmt$(tot.orders > 0 ? tot.revenue / tot.orders : 0)}</td></tr>
+    </table></div>
+    ${pend.orders > 0 ? `<div class="note"><b>${pend.orders} win${pend.orders === 1 ? '' : 's'} (${fmt$(pend.revenue)}) still on “Pending Source”.</b>
+      <a href="#/entries?month=${p.monthOf(end)}&source=${encodeURIComponent(PENDING)}">Set their source on the Entries tab →</a></div>` : ''}
+    `}`;
+
+    document.querySelectorAll('#periodseg button').forEach((b) => b.addEventListener('click', () => go('reporting', { period: b.dataset.period, person: personFilter })));
+    $('#repperson').addEventListener('change', (ev) => go('reporting', { period, person: ev.target.value }));
+  }
+
   // ---------- boot ----------
   async function reload() {
     const data = await db.loadAll();
@@ -524,6 +617,7 @@
     if (!S) await reload();
     const { path, q } = hashParts();
     if (path === 'entries') renderEntries(q);
+    else if (path === 'reporting') renderReporting(q);
     else if (path === 'new') renderForm(q);
     else if (path.startsWith('edit/')) renderForm(q, Number(path.slice(5)));
     else renderDashboard(q);
