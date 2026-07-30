@@ -721,7 +721,8 @@
                 <button class="btn wd cancel-lost">Cancel</button></div>`
             : `<div class="rowactions"><button class="btn won" data-won="${x.id}">Won</button>
                 <button class="btn lost" data-lost="${x.id}">Lost</button>
-                <button class="btn wd" data-wd="${x.id}">W/D</button></div>`;
+                <button class="btn wd" data-wd="${x.id}">W/D</button>
+                <button class="btn wd" data-reissue="${x.id}" title="Quote was reissued — reset its age to today">↻</button></div>`;
           return `<tr>${base}<td>${actions}</td></tr>`;
         }
         if (status === 'lost') return `<tr>${base}<td class="left">${x.loss_reason ? `<span class="pill">${esc(x.loss_reason)}</span>` : '<span class="muted">no reason recorded</span>'}</td><td class="num">${x.status_date ? ddmmyyyy(x.status_date) : '—'}</td></tr>`;
@@ -751,6 +752,17 @@
       try {
         await db.updateQuote(id, { status: 'lost', loss_reason: reason, status_date: asOf }, `web:${x.person}`);
         x.status = 'lost'; x.loss_reason = reason; x.status_date = asOf; lostPendingId = null;
+        renderPipeline(q);
+      } catch (err) { alert(err.message); }
+    }));
+    document.querySelectorAll('[data-reissue]').forEach((b) => b.addEventListener('click', async () => {
+      const x = S.quotes.find((z) => z.id === Number(b.dataset.reissue));
+      if (!confirm(`Reissued "${x.customer}"? This resets its age — quote date becomes today.`)) return;
+      const stamp = `Reissued ${asOf.slice(8, 10)}.${asOf.slice(5, 7)}`;
+      const notes = x.notes ? `${x.notes} | ${stamp}` : stamp;
+      try {
+        await db.updateQuote(x.id, { quote_date: asOf, notes }, `web:${x.person}`);
+        x.quote_date = asOf; x.notes = notes;
         renderPipeline(q);
       } catch (err) { alert(err.message); }
     }));
