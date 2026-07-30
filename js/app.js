@@ -466,7 +466,8 @@
       lead_source: existing.lead_source ?? '',
     } : {
       entry_date: todayBrisbane(), person: q.get('person') || '', customer: q.get('customer') || '',
-      order_ref: q.get('order_ref') || '', revenue: q.get('revenue') || '', gp_pct: q.get('gp') || '', lead_source: '',
+      order_ref: q.get('order_ref') || '', revenue: q.get('revenue') || '', gp_pct: q.get('gp') || '',
+      lead_source: LEAD_SOURCES.includes(q.get('lead')) ? q.get('lead') : '',
     };
     const fromQuote = !editing && q.get('from_quote') ? Number(q.get('from_quote')) : null;
 
@@ -651,7 +652,9 @@
     const personFilter = q.get('person') || '';
     const ageFilter = q.get('age') || '';
     const sort = ['oldest', 'newest', 'value'].includes(q.get('sort')) ? q.get('sort') : 'oldest';
-    const params = (over) => ({ status, person: personFilter, age: ageFilter, sort, ...over });
+    const search = (q.get('find') || '').trim();
+    const monthFilter = /^\d{4}-\d{2}$/.test(q.get('month') || '') ? q.get('month') : '';
+    const params = (over) => ({ status, person: personFilter, age: ageFilter, sort, find: search, month: monthFilter, ...over });
 
     if (db.quotesUnavailable()) {
       $('#app').innerHTML = `${navHtml('pipeline')}
@@ -678,6 +681,11 @@
     let rows = status === 'all' ? [...S.quotes] : S.quotes.filter((x) => x.status === status);
     if (personFilter) rows = rows.filter((x) => x.person === personFilter);
     if (ageFilter) rows = rows.filter((x) => bucketOf(aged(x)).key === ageFilter);
+    if (monthFilter) rows = rows.filter((x) => ((status === 'open' || status === 'all') ? x.quote_date : (x.status_date || x.quote_date)).slice(0, 7) === monthFilter);
+    if (search) {
+      const s = search.toLowerCase();
+      rows = rows.filter((x) => [x.customer, x.quote_ref, x.notes, x.person].some((v) => v && v.toLowerCase().includes(s)));
+    }
     rows.sort((a, b) => sort === 'value' ? b.value_cents - a.value_cents
       : sort === 'newest' ? b.quote_date.localeCompare(a.quote_date)
       : a.quote_date.localeCompare(b.quote_date));
@@ -701,20 +709,23 @@
         <div class="lbl">${b.label}</div><div class="amt num">${fmt$(b.value)}</div><div class="ct num">${b.count} quotes</div></a>`).join('')}
     </div>
     <div class="selectors">
+      <div><label>Search</label><input id="pf-find" value="${esc(search)}" placeholder="customer, quote #, note…" style="font:inherit;font-size:13.5px;padding:5px 8px;border:1px solid var(--line);border-radius:4px;background:#FFFDF8;width:180px"></div>
       <div><label>Status</label><select id="pf-status">${['open', 'won', 'lost', 'withdrawn', 'all'].map((s2) => `<option value="${s2}" ${s2 === status ? 'selected' : ''}>${s2[0].toUpperCase() + s2.slice(1)}</option>`).join('')}</select></div>
+      <div><label>Month</label><select id="pf-month"><option value="">All months</option>${S.fyMonths.map((m) => `<option value="${m}" ${m === monthFilter ? 'selected' : ''}>${monthLabel(m)}</option>`).join('')}</select></div>
       <div><label>Person</label><select id="pf-person"><option value="">Everyone</option>${S.roster.map((pp) => `<option ${pp === personFilter ? 'selected' : ''}>${esc(pp)}</option>`).join('')}</select></div>
       <div><label>Sort</label><select id="pf-sort">${[['oldest', 'Oldest first'], ['newest', 'Newest first'], ['value', 'Highest value']].map(([v, t]) => `<option value="${v}" ${v === sort ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
-      <span class="hintline">Filters are yours alone — nobody else's view changes</span>
+      <span class="hintline">Filters are yours alone</span>
     </div>
     <h2>${status === 'all' ? 'All quotes' : status[0].toUpperCase() + status.slice(1) + ' quotes'} — ${rows.length}</h2>
     <div class="panel scroll"><table>
-      <tr><th class="tight">Quote #</th><th class="tight">Quoted</th><th class="tight">Age</th><th class="left">Customer</th><th class="tight">Person</th><th class="tight">Value</th><th class="left">Notes / follow-ups</th>
+      <tr><th class="tight">Quote #</th><th class="tight">Quoted</th><th class="tight">Age</th><th class="left">Customer</th><th class="tight">Person</th><th class="tight">Value</th><th class="tight">Source</th><th class="left">Notes / follow-ups</th>
         ${isOpenView ? '<th class="tight" style="text-align:left">Status</th>' : status === 'lost' ? '<th class="left">Reason</th><th class="tight">Lost on</th><th class="tight">Came back?</th>' : '<th>Status</th><th class="tight">On</th><th class="tight"></th>'}</tr>
       ${rows.map((x) => {
         const d = aged(x); const bk = bucketOf(d);
         const base = `<td class="num left tight">${esc(x.quote_ref ?? '')}</td><td class="num tight">${ddmmyy(x.quote_date)}</td>
           <td class="tight"><span class="age ${bk.chip}">${d} days</span></td><td class="left">${esc(x.customer)}</td><td class="tight">${esc(x.person)}</td>
-          <td class="num tight">${fmt$(x.value_cents / 100)}</td>${noteCell(x)}`;
+          <td class="num tight">${fmt$(x.value_cents / 100)}</td>
+          <td class="tight" style="font-size:11.5px;color:var(--ink-soft)">${x.lead_source ? esc(x.lead_source) : '—'}</td>${noteCell(x)}`;
         if (isOpenView) {
           const actions = lostPendingId === x.id
             ? `<div class="reason">Why lost? <select id="lr-${x.id}">${LOSS_REASONS.map((r2) => `<option>${r2}</option>`).join('')}</select>
@@ -734,13 +745,16 @@
         if (status === 'lost') return `<tr>${base}<td class="left">${x.loss_reason ? `<span class="pill">${esc(x.loss_reason)}</span>` : '<span class="muted">no reason recorded</span>'}</td><td class="num">${x.status_date ? ddmmyy(x.status_date) : '—'}</td><td>${revive}</td></tr>`;
         return `<tr>${base}<td>${esc(x.status)}</td><td class="num">${x.status_date ? ddmmyy(x.status_date) : '—'}</td><td>${revive}</td></tr>`;
       }).join('')}
-      ${rows.length === 0 ? '<tr><td colspan="9" class="left" style="color:var(--ink-soft)">No quotes match this filter.</td></tr>' : ''}
-      ${rows.length ? `<tr class="team"><td></td><td>TOTAL</td><td></td><td class="left">${rows.length} quotes</td><td></td><td class="num">${fmt$(sumV(rows))}</td><td></td>${isOpenView ? '<td></td>' : '<td></td><td></td>'}</tr>` : ''}
+      ${rows.length === 0 ? '<tr><td colspan="11" class="left" style="color:var(--ink-soft)">No quotes match this filter.</td></tr>' : ''}
+      ${rows.length ? `<tr class="team"><td></td><td>TOTAL</td><td></td><td class="left">${rows.length} quotes</td><td></td><td class="num">${fmt$(sumV(rows))}</td><td></td><td></td>${isOpenView ? '<td></td>' : '<td></td><td></td><td></td>'}</tr>` : ''}
     </table>
     ${isOpenView ? '<div class="flow">Change a quote’s <b>Status</b> from the dropdown: <b>Won</b> opens “Log a sale” pre-filled (marked won when the sale saves) · <b>Lost</b> asks for a reason · <b>Withdrawn</b> = customer cancelled · <b>Reissued</b> resets its age to today.</div>' : ''}
     </div>`;
 
     const refresh = (over) => go('pipeline', params(over));
+    $('#pf-find').addEventListener('change', (ev) => refresh({ find: ev.target.value }));
+    $('#pf-find').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); refresh({ find: ev.target.value }); } });
+    $('#pf-month').addEventListener('change', (ev) => refresh({ month: ev.target.value }));
     $('#pf-status').addEventListener('change', (ev) => refresh({ status: ev.target.value, age: '' }));
     $('#pf-person').addEventListener('change', (ev) => refresh({ person: ev.target.value }));
     $('#pf-sort').addEventListener('change', (ev) => refresh({ sort: ev.target.value }));
@@ -750,7 +764,7 @@
       sel.value = ''; // snap back; real state changes only on confirm
       if (choice === 'won') {
         go('new', { from_quote: x.id, person: S.roster.includes(x.person) ? x.person : '', customer: x.customer,
-          order_ref: x.quote_ref ?? '', revenue: (x.value_cents / 100).toFixed(2), gp: x.gp_pct == null ? '' : (x.gp_pct * 100).toFixed(1) });
+          order_ref: x.quote_ref ?? '', revenue: (x.value_cents / 100).toFixed(2), gp: x.gp_pct == null ? '' : (x.gp_pct * 100).toFixed(1), lead: x.lead_source ?? '' });
       } else if (choice === 'lost') {
         lostPendingId = x.id; renderPipeline(q);
       } else if (choice === 'withdrawn') {
@@ -776,7 +790,7 @@
       sel.value = '';
       if (choice === 'won') {
         go('new', { from_quote: x.id, person: S.roster.includes(x.person) ? x.person : '', customer: x.customer,
-          order_ref: x.quote_ref ?? '', revenue: (x.value_cents / 100).toFixed(2), gp: x.gp_pct == null ? '' : (x.gp_pct * 100).toFixed(1) });
+          order_ref: x.quote_ref ?? '', revenue: (x.value_cents / 100).toFixed(2), gp: x.gp_pct == null ? '' : (x.gp_pct * 100).toFixed(1), lead: x.lead_source ?? '' });
       } else if (choice === 'reopen') {
         if (!confirm(`Reopen "${x.customer}" (${fmt$(x.value_cents / 100)})? It returns to the open pipeline with today as its quote date.`)) return;
         const stamp = `Reopened ${asOf.slice(8, 10)}.${asOf.slice(5, 7)}${x.loss_reason ? ` (was lost: ${x.loss_reason})` : x.status === 'withdrawn' ? ' (was withdrawn)' : ''}`;
@@ -808,7 +822,8 @@
       quote_ref: existing.quote_ref ?? '', quote_date: existing.quote_date, customer: existing.customer,
       person: existing.person, value: (existing.value_cents / 100).toFixed(2),
       gp_pct: existing.gp_pct == null ? '' : (existing.gp_pct * 100).toFixed(1), notes: existing.notes ?? '',
-    } : { quote_ref: '', quote_date: todayBrisbane(), customer: '', person: '', value: '', gp_pct: '', notes: '' };
+      lead_source: existing.lead_source ?? '',
+    } : { quote_ref: '', quote_date: todayBrisbane(), customer: '', person: '', value: '', gp_pct: '', notes: '', lead_source: '' };
 
     $('#app').innerHTML = `${navHtml('pipeline')}
     <header class="page"><div><p class="eyebrow">Sales Team</p><h1>${editing ? 'Edit quote' : 'Add a quote'}</h1></div>
@@ -825,6 +840,10 @@
       </select></div>
       <div class="field"><label>Quote value (AUD, ex-GST)</label><input name="value" value="${esc(f.value)}" required inputmode="decimal" placeholder="e.g. 4500.00"></div>
       <div class="field"><label>GP% (optional)</label><input name="gp_pct" value="${esc(f.gp_pct)}" inputmode="decimal" placeholder="e.g. 45"></div>
+      <div class="field"><label>Lead source</label><select name="lead_source">
+        <option value="" ${!f.lead_source ? 'selected' : ''}>Not set</option>
+        ${LEAD_SOURCES.map((s2) => `<option ${f.lead_source === s2 ? 'selected' : ''}>${esc(s2)}</option>`).join('')}
+      </select><div class="hint">Carries onto the sale when this quote is won.</div></div>
       <div class="field" style="grid-column:1/-1"><label>Notes / follow-ups</label>
         <textarea name="notes" rows="3" style="font:inherit;width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:5px;background:#FFFDF8">${esc(f.notes)}</textarea>
         <div class="hint">The follow-up log — e.g. "LN 30.07 sent quote | 05.08 followed up".</div></div>
@@ -853,6 +872,7 @@
         quote_ref: String(fd.quote_ref).trim() || null, quote_date: fd.quote_date,
         customer: String(fd.customer).trim(), person: fd.person,
         value_cents: Math.round(parseFloat(cleaned) * 100), gp_pct: gp, notes: String(fd.notes ?? '').trim() || null,
+        lead_source: LEAD_SOURCES.includes(fd.lead_source) ? fd.lead_source : null,
       };
       try {
         if (editing) await db.updateQuote(editId, fields, `web:${fields.person}`);

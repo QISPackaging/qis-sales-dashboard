@@ -115,7 +115,7 @@
         person: r.person, value_cents: Number(r.value_cents),
         gp_pct: r.gp_pct == null ? null : Number(r.gp_pct),
         status: r.status, loss_reason: r.loss_reason, status_date: r.status_date,
-        notes: r.notes ?? '', won_entry_id: r.won_entry_id,
+        notes: r.notes ?? '', won_entry_id: r.won_entry_id, lead_source: r.lead_source ?? null,
       }));
     } catch (err) {
       console.warn('quotes unavailable:', err.message);
