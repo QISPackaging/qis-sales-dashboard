@@ -709,7 +709,7 @@
     <h2>${status === 'all' ? 'All quotes' : status[0].toUpperCase() + status.slice(1) + ' quotes'} — ${rows.length}</h2>
     <div class="panel scroll"><table>
       <tr><th class="tight">Quote #</th><th class="tight">Quoted</th><th class="tight">Age</th><th class="left">Customer</th><th class="tight">Person</th><th class="tight">Value</th><th class="left">Notes / follow-ups</th>
-        ${isOpenView ? '<th style="text-align:right">Outcome</th>' : status === 'lost' ? '<th class="left">Reason</th><th>Lost on</th>' : '<th>Status</th><th>On</th>'}</tr>
+        ${isOpenView ? '<th class="tight" style="text-align:left">Status</th>' : status === 'lost' ? '<th class="left">Reason</th><th>Lost on</th>' : '<th>Status</th><th>On</th>'}</tr>
       ${rows.map((x) => {
         const d = aged(x); const bk = bucketOf(d);
         const base = `<td class="num left tight">${esc(x.quote_ref ?? '')}</td><td class="num tight">${ddmmyy(x.quote_date)}</td>
@@ -720,10 +720,13 @@
             ? `<div class="reason">Why lost? <select id="lr-${x.id}">${LOSS_REASONS.map((r2) => `<option>${r2}</option>`).join('')}</select>
                 <button class="btn lost confirm-lost" data-id="${x.id}" style="background:var(--bad);color:#fff;border:none">Confirm</button>
                 <button class="btn wd cancel-lost">Cancel</button></div>`
-            : `<div class="rowactions"><button class="btn won" data-won="${x.id}">Won</button>
-                <button class="btn lost" data-lost="${x.id}">Lost</button>
-                <button class="btn wd" data-wd="${x.id}">W/D</button>
-                <button class="btn wd" data-reissue="${x.id}" title="Quote was reissued — reset its age to today">↻</button></div>`;
+            : `<select class="src-select qstatus" data-id="${x.id}">
+                <option value="" selected>Open</option>
+                <option value="won">Won ✓</option>
+                <option value="lost">Lost…</option>
+                <option value="withdrawn">Withdrawn</option>
+                <option value="reissued">Reissued — reset age</option>
+              </select>`;
           return `<tr>${base}<td>${actions}</td></tr>`;
         }
         if (status === 'lost') return `<tr>${base}<td class="left">${x.loss_reason ? `<span class="pill">${esc(x.loss_reason)}</span>` : '<span class="muted">no reason recorded</span>'}</td><td class="num">${x.status_date ? ddmmyyyy(x.status_date) : '—'}</td></tr>`;
@@ -732,19 +735,38 @@
       ${rows.length === 0 ? '<tr><td colspan="9" class="left" style="color:var(--ink-soft)">No quotes match this filter.</td></tr>' : ''}
       ${rows.length ? `<tr class="team"><td></td><td>TOTAL</td><td></td><td class="left">${rows.length} quotes</td><td></td><td class="num">${fmt$(sumV(rows))}</td><td></td>${isOpenView ? '<td></td>' : '<td></td><td></td>'}</tr>` : ''}
     </table>
-    ${isOpenView ? '<div class="flow"><b>Won</b> opens “Log a sale” pre-filled — the quote is marked won when the sale saves. <b>Lost</b> asks for a reason. <b>W/D</b> = withdrawn (customer cancelled the request).</div>' : ''}
+    ${isOpenView ? '<div class="flow">Change a quote’s <b>Status</b> from the dropdown: <b>Won</b> opens “Log a sale” pre-filled (marked won when the sale saves) · <b>Lost</b> asks for a reason · <b>Withdrawn</b> = customer cancelled · <b>Reissued</b> resets its age to today.</div>' : ''}
     </div>`;
 
     const refresh = (over) => go('pipeline', params(over));
     $('#pf-status').addEventListener('change', (ev) => refresh({ status: ev.target.value, age: '' }));
     $('#pf-person').addEventListener('change', (ev) => refresh({ person: ev.target.value }));
     $('#pf-sort').addEventListener('change', (ev) => refresh({ sort: ev.target.value }));
-    document.querySelectorAll('[data-won]').forEach((b) => b.addEventListener('click', () => {
-      const x = S.quotes.find((z) => z.id === Number(b.dataset.won));
-      go('new', { from_quote: x.id, person: S.roster.includes(x.person) ? x.person : '', customer: x.customer,
-        order_ref: x.quote_ref ?? '', revenue: (x.value_cents / 100).toFixed(2), gp: x.gp_pct == null ? '' : (x.gp_pct * 100).toFixed(1) });
+    document.querySelectorAll('.qstatus').forEach((sel) => sel.addEventListener('change', async () => {
+      const x = S.quotes.find((z) => z.id === Number(sel.dataset.id));
+      const choice = sel.value;
+      sel.value = ''; // snap back; real state changes only on confirm
+      if (choice === 'won') {
+        go('new', { from_quote: x.id, person: S.roster.includes(x.person) ? x.person : '', customer: x.customer,
+          order_ref: x.quote_ref ?? '', revenue: (x.value_cents / 100).toFixed(2), gp: x.gp_pct == null ? '' : (x.gp_pct * 100).toFixed(1) });
+      } else if (choice === 'lost') {
+        lostPendingId = x.id; renderPipeline(q);
+      } else if (choice === 'withdrawn') {
+        if (!confirm(`Mark "${x.customer}" (${fmt$(x.value_cents / 100)}) as withdrawn?`)) return;
+        try {
+          await db.updateQuote(x.id, { status: 'withdrawn', status_date: asOf }, `web:${x.person}`);
+          x.status = 'withdrawn'; x.status_date = asOf; renderPipeline(q);
+        } catch (err) { alert(err.message); }
+      } else if (choice === 'reissued') {
+        if (!confirm(`Reissued "${x.customer}"? This resets its age — quote date becomes today.`)) return;
+        const stamp = `Reissued ${asOf.slice(8, 10)}.${asOf.slice(5, 7)}`;
+        const notes = x.notes ? `${x.notes} | ${stamp}` : stamp;
+        try {
+          await db.updateQuote(x.id, { quote_date: asOf, notes }, `web:${x.person}`);
+          x.quote_date = asOf; x.notes = notes; renderPipeline(q);
+        } catch (err) { alert(err.message); }
+      }
     }));
-    document.querySelectorAll('[data-lost]').forEach((b) => b.addEventListener('click', () => { lostPendingId = Number(b.dataset.lost); renderPipeline(q); }));
     document.querySelectorAll('.cancel-lost').forEach((b) => b.addEventListener('click', () => { lostPendingId = null; renderPipeline(q); }));
     document.querySelectorAll('.confirm-lost').forEach((b) => b.addEventListener('click', async () => {
       const id = Number(b.dataset.id);
@@ -753,26 +775,6 @@
       try {
         await db.updateQuote(id, { status: 'lost', loss_reason: reason, status_date: asOf }, `web:${x.person}`);
         x.status = 'lost'; x.loss_reason = reason; x.status_date = asOf; lostPendingId = null;
-        renderPipeline(q);
-      } catch (err) { alert(err.message); }
-    }));
-    document.querySelectorAll('[data-reissue]').forEach((b) => b.addEventListener('click', async () => {
-      const x = S.quotes.find((z) => z.id === Number(b.dataset.reissue));
-      if (!confirm(`Reissued "${x.customer}"? This resets its age — quote date becomes today.`)) return;
-      const stamp = `Reissued ${asOf.slice(8, 10)}.${asOf.slice(5, 7)}`;
-      const notes = x.notes ? `${x.notes} | ${stamp}` : stamp;
-      try {
-        await db.updateQuote(x.id, { quote_date: asOf, notes }, `web:${x.person}`);
-        x.quote_date = asOf; x.notes = notes;
-        renderPipeline(q);
-      } catch (err) { alert(err.message); }
-    }));
-    document.querySelectorAll('[data-wd]').forEach((b) => b.addEventListener('click', async () => {
-      const x = S.quotes.find((z) => z.id === Number(b.dataset.wd));
-      if (!confirm(`Mark "${x.customer}" (${fmt$(x.value_cents / 100)}) as withdrawn?`)) return;
-      try {
-        await db.updateQuote(x.id, { status: 'withdrawn', status_date: asOf }, `web:${x.person}`);
-        x.status = 'withdrawn'; x.status_date = asOf;
         renderPipeline(q);
       } catch (err) { alert(err.message); }
     }));
