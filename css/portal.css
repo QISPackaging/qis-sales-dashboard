@@ -233,3 +233,9 @@ footer{margin-top:44px;border-top:1px solid var(--line);padding-top:14px;
 .pill{font-size:11px;font-weight:600;padding:2px 8px;border-radius:99px;background:var(--bad-bg);color:var(--bad)}
 .qnote{max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--ink-soft)}
 .hintline{font-size:12px;color:var(--ink-soft);align-self:center;padding-top:12px}
+
+/* pipeline polish: tight columns + note hover tooltip */
+th.tight,td.tight{width:1%;white-space:nowrap}
+#qtip{display:none;position:fixed;z-index:60;background:var(--ink);color:#F7F5F0;border-radius:6px;
+  padding:10px 13px;font-size:12.5px;line-height:1.5;width:380px;max-width:78vw;white-space:normal;
+  box-shadow:0 8px 22px rgba(0,0,0,.22);pointer-events:none}

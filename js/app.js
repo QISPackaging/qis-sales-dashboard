@@ -682,7 +682,8 @@
       : sort === 'newest' ? b.quote_date.localeCompare(a.quote_date)
       : a.quote_date.localeCompare(b.quote_date));
 
-    const noteCell = (x) => `<td class="left qnote"><a class="pname" href="#/quote-edit/${x.id}" title="${esc(x.notes)}">${x.notes ? esc(x.notes.slice(0, 46)) + (x.notes.length > 46 ? '…' : '') : '<span class=muted>+ add note</span>'}</a></td>`;
+    const noteCell = (x) => `<td class="left qnote" ${x.notes ? `data-note="${esc(x.notes)}"` : ''}><a class="pname" href="#/quote-edit/${x.id}">${x.notes ? esc(x.notes.slice(0, 46)) + (x.notes.length > 46 ? '…' : '') : '<span class=muted>+ add note</span>'}</a></td>`;
+    const ddmmyy = (iso) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(2, 4)}`;
     const isOpenView = status === 'open';
 
     $('#app').innerHTML = `${navHtml('pipeline')}
@@ -707,13 +708,13 @@
     </div>
     <h2>${status === 'all' ? 'All quotes' : status[0].toUpperCase() + status.slice(1) + ' quotes'} — ${rows.length}</h2>
     <div class="panel scroll"><table>
-      <tr><th>Quote #</th><th>Quoted</th><th>Age</th><th class="left">Customer</th><th>Person</th><th>Value</th><th class="left">Notes / follow-ups</th>
+      <tr><th class="tight">Quote #</th><th class="tight">Quoted</th><th class="tight">Age</th><th class="left">Customer</th><th class="tight">Person</th><th class="tight">Value</th><th class="left">Notes / follow-ups</th>
         ${isOpenView ? '<th style="text-align:right">Outcome</th>' : status === 'lost' ? '<th class="left">Reason</th><th>Lost on</th>' : '<th>Status</th><th>On</th>'}</tr>
       ${rows.map((x) => {
         const d = aged(x); const bk = bucketOf(d);
-        const base = `<td class="num left">${esc(x.quote_ref ?? '')}</td><td class="num">${ddmmyyyy(x.quote_date)}</td>
-          <td><span class="age ${bk.chip}">${d} days</span></td><td class="left">${esc(x.customer)}</td><td>${esc(x.person)}</td>
-          <td class="num">${fmt$(x.value_cents / 100)}</td>${noteCell(x)}`;
+        const base = `<td class="num left tight">${esc(x.quote_ref ?? '')}</td><td class="num tight">${ddmmyy(x.quote_date)}</td>
+          <td class="tight"><span class="age ${bk.chip}">${d} days</span></td><td class="left">${esc(x.customer)}</td><td class="tight">${esc(x.person)}</td>
+          <td class="num tight">${fmt$(x.value_cents / 100)}</td>${noteCell(x)}`;
         if (isOpenView) {
           const actions = lostPendingId === x.id
             ? `<div class="reason">Why lost? <select id="lr-${x.id}">${LOSS_REASONS.map((r2) => `<option>${r2}</option>`).join('')}</select>
@@ -873,6 +874,21 @@
     else renderDashboard(q);
     window.scrollTo(0, 0);
   }
+
+  // hover tooltip for full quote notes (fixed-position so table scrolling can't clip it)
+  const qtip = document.createElement('div');
+  qtip.id = 'qtip';
+  document.body.appendChild(qtip);
+  document.addEventListener('mouseover', (ev) => {
+    const cell = ev.target.closest && ev.target.closest('.qnote[data-note]');
+    if (!cell) { qtip.style.display = 'none'; return; }
+    qtip.textContent = cell.dataset.note;
+    const r = cell.getBoundingClientRect();
+    qtip.style.display = 'block';
+    qtip.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - 400))}px`;
+    qtip.style.top = `${Math.min(r.bottom + 6, window.innerHeight - 140)}px`;
+  });
+  document.addEventListener('scroll', () => { qtip.style.display = 'none'; }, true);
 
   window.addEventListener('hashchange', route);
   route().catch((err) => {
