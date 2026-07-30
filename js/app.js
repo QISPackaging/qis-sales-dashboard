@@ -725,7 +725,10 @@
         const base = `<td class="num left tight">${esc(x.quote_ref ?? '')}</td><td class="num tight">${ddmmyy(x.quote_date)}</td>
           <td class="tight"><span class="age ${bk.chip}">${d} days</span></td><td class="left">${esc(x.customer)}</td><td class="tight">${esc(x.person)}</td>
           <td class="num tight">${fmt$(x.value_cents / 100)}</td>
-          <td class="tight" style="font-size:11.5px;color:var(--ink-soft)">${x.lead_source ? esc(x.lead_source) : '—'}</td>${noteCell(x)}`;
+          <td class="tight"><select class="src-select qsrc" data-id="${x.id}" style="max-width:130px">
+            <option value="" ${!x.lead_source ? 'selected' : ''}>—</option>
+            ${LEAD_SOURCES.map((s2) => `<option ${x.lead_source === s2 ? 'selected' : ''}>${esc(s2)}</option>`).join('')}
+          </select></td>${noteCell(x)}`;
         if (isOpenView) {
           const actions = lostPendingId === x.id
             ? `<div class="reason">Why lost? <select id="lr-${x.id}">${LOSS_REASONS.map((r2) => `<option>${r2}</option>`).join('')}</select>
@@ -782,6 +785,12 @@
           x.quote_date = asOf; x.notes = notes; renderPipeline(q);
         } catch (err) { alert(err.message); }
       }
+    }));
+    document.querySelectorAll('.qsrc').forEach((sel) => sel.addEventListener('change', async () => {
+      const x = S.quotes.find((z) => z.id === Number(sel.dataset.id));
+      const val = sel.value || null;
+      try { await db.updateQuote(x.id, { lead_source: val }, `web:${x.person}`); x.lead_source = val; }
+      catch (err) { alert(err.message); sel.value = x.lead_source ?? ''; }
     }));
     document.querySelectorAll('.cancel-lost').forEach((b) => b.addEventListener('click', () => { lostPendingId = null; renderPipeline(q); }));
     document.querySelectorAll('.qrevive').forEach((sel) => sel.addEventListener('change', async () => {
