@@ -15,6 +15,17 @@
   const INBOUND = new Set(['In Bound Email', 'In Bound Call', 'In Bound Order/PO', 'Pop Up Form', 'Online form Submission']);
   const OUTBOUND = new Set(['Liam N Outbound', 'Jack N Outbound', 'Luke H Outbound', 'Allegra Outbound']);
   const sourceType = (src) => (INBOUND.has(src) ? 'in' : OUTBOUND.has(src) ? 'out' : 'pend');
+  const LOSS_REASONS = ['Price too high', 'Chose a competitor', 'No response / went quiet',
+    'Timing / project postponed', "Couldn't meet spec or MOQ", 'Lead time too long', 'Other'];
+  // aging buckets (days): long purchasing cycles — aged = 60+
+  const AGE_BUCKETS = [
+    { key: '0-14', label: '0–14 days', min: 0, max: 14, cls: 'b1', chip: 'a1' },
+    { key: '15-30', label: '15–30 days', min: 15, max: 30, cls: 'b2', chip: 'a2' },
+    { key: '30-60', label: '30–60 days', min: 31, max: 59, cls: 'b3', chip: 'a3' },
+    { key: '60+', label: '60+ days ⚠', min: 60, max: 99999, cls: 'b4', chip: 'a4' },
+  ];
+  const ageOf = (q, asOf) => Math.max(0, Math.round((Date.parse(asOf) - Date.parse(q.quote_date)) / 86400000));
+  const bucketOf = (days) => AGE_BUCKETS.find((b) => days >= b.min && days <= b.max) || AGE_BUCKETS[3];
 
   let S = null; // { entries, targets, holidays(Set), roster, fyMonths }
 
@@ -218,7 +229,7 @@
     const link = (path, label) => `<a class="navlink ${active === path ? 'active' : ''}" href="#/${path}">${label}</a>`;
     return `<nav>
       <span class="brand"><img src="img/qis-logo.png" alt="QIS Packaging"></span>
-      ${link('dashboard', 'Dashboard')}${link('entries', 'Entries')}${link('new', 'Log a sale')}${link('reporting', 'Reporting')}
+      ${link('dashboard', 'Dashboard')}${link('pipeline', 'Pipeline')}${link('entries', 'Entries')}${link('new', 'Log a sale')}${link('reporting', 'Reporting')}
       <span class="who">${db.isDemo() ? '<b style="color:var(--warn)">preview data</b>' : 'Shared link'}</span>
     </nav>`;
   }
@@ -453,10 +464,15 @@
       order_ref: existing.order_ref ?? '', revenue: (existing.revenue_cents / 100).toFixed(2),
       gp_pct: existing.gp_pct == null ? '' : (existing.gp_pct * 100).toFixed(2),
       lead_source: existing.lead_source ?? '',
-    } : { entry_date: todayBrisbane(), person: '', customer: '', order_ref: '', revenue: '', gp_pct: '', lead_source: '' };
+    } : {
+      entry_date: todayBrisbane(), person: q.get('person') || '', customer: q.get('customer') || '',
+      order_ref: q.get('order_ref') || '', revenue: q.get('revenue') || '', gp_pct: q.get('gp') || '', lead_source: '',
+    };
+    const fromQuote = !editing && q.get('from_quote') ? Number(q.get('from_quote')) : null;
 
     $('#app').innerHTML = `${navHtml('new')}
     <header class="page"><div><p class="eyebrow">Sales Team</p><h1>${editing ? 'Edit entry' : 'Log a sale'}</h1></div></header>
+    ${fromQuote ? '<div class="flow"><b>Logging a quote win</b> — details are pre-filled from the quote; adjust the final figures if they changed, and saving will mark the quote as won.</div>' : ''}
     <div id="formmsg"></div>
     <form id="entryform">
       <div class="formgrid">
@@ -502,8 +518,15 @@
       }
       try {
         if (editing) await db.updateEntry(editingId, parsed.value, `web:${parsed.value.person}`);
-        else await db.createEntry(parsed.value, `web:${parsed.value.person}`);
+        else {
+          const newId = await db.createEntry(parsed.value, `web:${parsed.value.person}`);
+          if (fromQuote) {
+            // the Won flow: the quote is marked won only once the sale is saved
+            await db.updateQuote(fromQuote, { status: 'won', status_date: parsed.value.entry_date, won_entry_id: newId }, `web:${parsed.value.person}`);
+          }
+        }
         await reload();
+        if (fromQuote) { go('pipeline'); return; }
         go('entries', { month: parsed.value.entry_date.slice(0, 7) });
       } catch (err) {
         msg.innerHTML = `<div class="errors">Could not save: ${esc(err.message)}</div>`;
@@ -595,21 +618,233 @@
     </table></div>
     ${pend.orders > 0 ? `<div class="note"><b>${pend.orders} win${pend.orders === 1 ? '' : 's'} (${fmt$(pend.revenue)}) still on “Pending Source”.</b>
       <a href="#/entries?month=${p.monthOf(end)}&source=${encodeURIComponent(PENDING)}">Set their source on the Entries tab →</a></div>` : ''}
-    `}`;
+    `}${(() => {
+      // ---- loss analysis (from pipeline quotes, same period) ----
+      const lost = (S.quotes || []).filter((x) => x.status === 'lost' && x.status_date && x.status_date >= start && x.status_date <= end && (!personFilter || x.person === personFilter));
+      if (!lost.length) return `<h2>Lost quotes — ${esc(label)}</h2><div class="panel" style="color:var(--ink-soft)">No lost quotes recorded in this period. Loss reasons build here as the team marks quotes Lost on the Pipeline tab.</div>`;
+      const byR = new Map();
+      for (const x of lost) {
+        const r2 = x.loss_reason || 'No reason recorded';
+        const g = byR.get(r2) || { r: r2, v: 0, n: 0 };
+        g.v += x.value_cents / 100; g.n += 1; byR.set(r2, g);
+      }
+      const lst = [...byR.values()].sort((a, b) => b.v - a.v);
+      const mx = lst[0].v || 1;
+      const totL = lst.reduce((s, g) => s + g.v, 0);
+      return `<h2>Lost quotes — why we lose (${esc(label)})</h2>
+      <div class="panel"><div class="bars">${lst.map((g) => `<div class="barrow"><span class="lbl">${esc(g.r)}</span>
+        <div class="bartrack"><div class="barfill pend" style="width:${Math.max(2, g.v / mx * 100)}%;background:var(--bad)"></div></div>
+        <span class="barval">${fmt$(g.v)} · ${g.n}</span></div>`).join('')}</div>
+      <p class="muted" style="font-size:12px;margin:12px 0 0">Total lost: ${fmt$(totL)} across ${lost.length} quote${lost.length === 1 ? '' : 's'} · <a class="pname" href="#/pipeline?status=lost">see the lost list →</a></p></div>`;
+    })()}`;
 
     document.querySelectorAll('#periodseg button').forEach((b) => b.addEventListener('click', () => go('reporting', { period: b.dataset.period, person: personFilter })));
     $('#repperson').addEventListener('change', (ev) => go('reporting', { period, person: ev.target.value }));
   }
 
+  // ---------- pipeline ----------
+  let lostPendingId = null; // quote id currently showing the loss-reason prompt
+
+  function renderPipeline(q) {
+    const asOf = todayBrisbane();
+    const status = ['open', 'won', 'lost', 'withdrawn', 'all'].includes(q.get('status')) ? q.get('status') : 'open';
+    const personFilter = q.get('person') || '';
+    const ageFilter = q.get('age') || '';
+    const sort = ['oldest', 'newest', 'value'].includes(q.get('sort')) ? q.get('sort') : 'oldest';
+    const params = (over) => ({ status, person: personFilter, age: ageFilter, sort, ...over });
+
+    if (db.quotesUnavailable()) {
+      $('#app').innerHTML = `${navHtml('pipeline')}
+        <header class="page"><div><p class="eyebrow">Sales Team</p><h1>Pipeline</h1></div></header>
+        <div class="panel" style="color:var(--ink-soft)">The pipeline isn't set up in the database yet — the quotes table is missing. (Liam: run the pipeline SQL in Supabase, then refresh.)</div>`;
+      return;
+    }
+
+    const open = S.quotes.filter((x) => x.status === 'open');
+    const aged = (x) => ageOf(x, asOf);
+    const sumV = (list) => list.reduce((s, x) => s + x.value_cents, 0) / 100;
+    const buckets = AGE_BUCKETS.map((b) => {
+      const inB = open.filter((x) => { const d = aged(x); return d >= b.min && d <= b.max; });
+      return { ...b, count: inB.length, value: sumV(inB) };
+    });
+    const aged60 = buckets[3];
+    const avgDays = open.length ? Math.round(open.reduce((s, x) => s + aged(x), 0) / open.length) : 0;
+    const fyEnd = p.monthEnd(S.fyMonths[11]);
+    const decided = S.quotes.filter((x) => (x.status === 'won' || x.status === 'lost') && x.status_date && x.status_date >= C.FY_START && x.status_date <= fyEnd);
+    const wonV = sumV(decided.filter((x) => x.status === 'won'));
+    const decV = sumV(decided);
+    const winRate = decV > 0 ? (wonV / decV * 100).toFixed(0) + '%' : '—';
+
+    let rows = status === 'all' ? [...S.quotes] : S.quotes.filter((x) => x.status === status);
+    if (personFilter) rows = rows.filter((x) => x.person === personFilter);
+    if (ageFilter) rows = rows.filter((x) => bucketOf(aged(x)).key === ageFilter);
+    rows.sort((a, b) => sort === 'value' ? b.value_cents - a.value_cents
+      : sort === 'newest' ? b.quote_date.localeCompare(a.quote_date)
+      : a.quote_date.localeCompare(b.quote_date));
+
+    const noteCell = (x) => `<td class="left qnote"><a class="pname" href="#/quote-edit/${x.id}" title="${esc(x.notes)}">${x.notes ? esc(x.notes.slice(0, 46)) + (x.notes.length > 46 ? '…' : '') : '<span class=muted>+ add note</span>'}</a></td>`;
+    const isOpenView = status === 'open';
+
+    $('#app').innerHTML = `${navHtml('pipeline')}
+    <header class="page"><div><p class="eyebrow">Sales Team</p><h1>Pipeline</h1></div>
+      <div><a class="btn accent" href="#/quote-new">+ Add a quote</a></div></header>
+    <div class="tiles">
+      <div class="tile"><div class="k">Open pipeline</div><div class="v num">${fmt$(sumV(open))}</div><div class="s num">${open.length} quotes</div></div>
+      <div class="tile alert"><div class="k">Aged 60+ days</div><div class="v num">${fmt$(aged60.value)}</div><div class="s num">${aged60.count} quotes — needs attention</div></div>
+      <div class="tile"><div class="k">Avg days open</div><div class="v num">${avgDays}</div><div class="s">across open quotes</div></div>
+      <div class="tile"><div class="k">Win rate (FY)</div><div class="v num">${winRate}</div><div class="s">${decV > 0 ? 'by value, of decided quotes' : 'builds as outcomes are recorded'}</div></div>
+    </div>
+    <h2>Aging — click a bucket to filter</h2>
+    <div class="agerow">${buckets.map((b) => `
+      <a class="abucket ${b.cls} ${ageFilter === b.key ? 'onb' : ''}" href="#/pipeline?${new URLSearchParams(params({ age: ageFilter === b.key ? '' : b.key, status: 'open' }))}">
+        <div class="lbl">${b.label}</div><div class="amt num">${fmt$(b.value)}</div><div class="ct num">${b.count} quotes</div></a>`).join('')}
+    </div>
+    <div class="selectors">
+      <div><label>Status</label><select id="pf-status">${['open', 'won', 'lost', 'withdrawn', 'all'].map((s2) => `<option value="${s2}" ${s2 === status ? 'selected' : ''}>${s2[0].toUpperCase() + s2.slice(1)}</option>`).join('')}</select></div>
+      <div><label>Person</label><select id="pf-person"><option value="">Everyone</option>${S.roster.map((pp) => `<option ${pp === personFilter ? 'selected' : ''}>${esc(pp)}</option>`).join('')}</select></div>
+      <div><label>Sort</label><select id="pf-sort">${[['oldest', 'Oldest first'], ['newest', 'Newest first'], ['value', 'Highest value']].map(([v, t]) => `<option value="${v}" ${v === sort ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+      <span class="hintline">Filters are yours alone — nobody else's view changes</span>
+    </div>
+    <h2>${status === 'all' ? 'All quotes' : status[0].toUpperCase() + status.slice(1) + ' quotes'} — ${rows.length}</h2>
+    <div class="panel scroll"><table>
+      <tr><th>Quote #</th><th>Quoted</th><th>Age</th><th class="left">Customer</th><th>Person</th><th>Value</th><th class="left">Notes / follow-ups</th>
+        ${isOpenView ? '<th style="text-align:right">Outcome</th>' : status === 'lost' ? '<th class="left">Reason</th><th>Lost on</th>' : '<th>Status</th><th>On</th>'}</tr>
+      ${rows.map((x) => {
+        const d = aged(x); const bk = bucketOf(d);
+        const base = `<td class="num left">${esc(x.quote_ref ?? '')}</td><td class="num">${ddmmyyyy(x.quote_date)}</td>
+          <td><span class="age ${bk.chip}">${d} days</span></td><td class="left">${esc(x.customer)}</td><td>${esc(x.person)}</td>
+          <td class="num">${fmt$(x.value_cents / 100)}</td>${noteCell(x)}`;
+        if (isOpenView) {
+          const actions = lostPendingId === x.id
+            ? `<div class="reason">Why lost? <select id="lr-${x.id}">${LOSS_REASONS.map((r2) => `<option>${r2}</option>`).join('')}</select>
+                <button class="btn lost confirm-lost" data-id="${x.id}" style="background:var(--bad);color:#fff;border:none">Confirm</button>
+                <button class="btn wd cancel-lost">Cancel</button></div>`
+            : `<div class="rowactions"><button class="btn won" data-won="${x.id}">Won</button>
+                <button class="btn lost" data-lost="${x.id}">Lost</button>
+                <button class="btn wd" data-wd="${x.id}">W/D</button></div>`;
+          return `<tr>${base}<td>${actions}</td></tr>`;
+        }
+        if (status === 'lost') return `<tr>${base}<td class="left">${x.loss_reason ? `<span class="pill">${esc(x.loss_reason)}</span>` : '<span class="muted">no reason recorded</span>'}</td><td class="num">${x.status_date ? ddmmyyyy(x.status_date) : '—'}</td></tr>`;
+        return `<tr>${base}<td>${esc(x.status)}</td><td class="num">${x.status_date ? ddmmyyyy(x.status_date) : '—'}</td></tr>`;
+      }).join('')}
+      ${rows.length === 0 ? '<tr><td colspan="9" class="left" style="color:var(--ink-soft)">No quotes match this filter.</td></tr>' : ''}
+      ${rows.length ? `<tr class="team"><td></td><td>TOTAL</td><td></td><td class="left">${rows.length} quotes</td><td></td><td class="num">${fmt$(sumV(rows))}</td><td></td>${isOpenView ? '<td></td>' : '<td></td><td></td>'}</tr>` : ''}
+    </table>
+    ${isOpenView ? '<div class="flow"><b>Won</b> opens “Log a sale” pre-filled — the quote is marked won when the sale saves. <b>Lost</b> asks for a reason. <b>W/D</b> = withdrawn (customer cancelled the request).</div>' : ''}
+    </div>`;
+
+    const refresh = (over) => go('pipeline', params(over));
+    $('#pf-status').addEventListener('change', (ev) => refresh({ status: ev.target.value, age: '' }));
+    $('#pf-person').addEventListener('change', (ev) => refresh({ person: ev.target.value }));
+    $('#pf-sort').addEventListener('change', (ev) => refresh({ sort: ev.target.value }));
+    document.querySelectorAll('[data-won]').forEach((b) => b.addEventListener('click', () => {
+      const x = S.quotes.find((z) => z.id === Number(b.dataset.won));
+      go('new', { from_quote: x.id, person: S.roster.includes(x.person) ? x.person : '', customer: x.customer,
+        order_ref: x.quote_ref ?? '', revenue: (x.value_cents / 100).toFixed(2), gp: x.gp_pct == null ? '' : (x.gp_pct * 100).toFixed(1) });
+    }));
+    document.querySelectorAll('[data-lost]').forEach((b) => b.addEventListener('click', () => { lostPendingId = Number(b.dataset.lost); renderPipeline(q); }));
+    document.querySelectorAll('.cancel-lost').forEach((b) => b.addEventListener('click', () => { lostPendingId = null; renderPipeline(q); }));
+    document.querySelectorAll('.confirm-lost').forEach((b) => b.addEventListener('click', async () => {
+      const id = Number(b.dataset.id);
+      const reason = document.querySelector(`#lr-${id}`).value;
+      const x = S.quotes.find((z) => z.id === id);
+      try {
+        await db.updateQuote(id, { status: 'lost', loss_reason: reason, status_date: asOf }, `web:${x.person}`);
+        x.status = 'lost'; x.loss_reason = reason; x.status_date = asOf; lostPendingId = null;
+        renderPipeline(q);
+      } catch (err) { alert(err.message); }
+    }));
+    document.querySelectorAll('[data-wd]').forEach((b) => b.addEventListener('click', async () => {
+      const x = S.quotes.find((z) => z.id === Number(b.dataset.wd));
+      if (!confirm(`Mark "${x.customer}" (${fmt$(x.value_cents / 100)}) as withdrawn?`)) return;
+      try {
+        await db.updateQuote(x.id, { status: 'withdrawn', status_date: asOf }, `web:${x.person}`);
+        x.status = 'withdrawn'; x.status_date = asOf;
+        renderPipeline(q);
+      } catch (err) { alert(err.message); }
+    }));
+  }
+
+  function renderQuoteForm(q, editId = null) {
+    const editing = editId != null;
+    const existing = editing ? S.quotes.find((x) => x.id === editId) : null;
+    if (editing && !existing) { go('pipeline'); return; }
+    const f = existing ? {
+      quote_ref: existing.quote_ref ?? '', quote_date: existing.quote_date, customer: existing.customer,
+      person: existing.person, value: (existing.value_cents / 100).toFixed(2),
+      gp_pct: existing.gp_pct == null ? '' : (existing.gp_pct * 100).toFixed(1), notes: existing.notes ?? '',
+    } : { quote_ref: '', quote_date: todayBrisbane(), customer: '', person: '', value: '', gp_pct: '', notes: '' };
+
+    $('#app').innerHTML = `${navHtml('pipeline')}
+    <header class="page"><div><p class="eyebrow">Sales Team</p><h1>${editing ? 'Edit quote' : 'Add a quote'}</h1></div>
+      ${editing ? `<button class="btn danger small" id="delquote">Delete quote</button>` : ''}</header>
+    <div id="qmsg"></div>
+    <form id="quoteform"><div class="formgrid">
+      <div class="field"><label>Quote #</label><input name="quote_ref" value="${esc(f.quote_ref)}" maxlength="40" placeholder="e.g. SQ#684"></div>
+      <div class="field"><label>Quote date</label><input type="date" name="quote_date" value="${f.quote_date}" required></div>
+      <div class="field"><label>Customer</label><input name="customer" value="${esc(f.customer)}" required maxlength="200"></div>
+      <div class="field"><label>Salesperson</label><select name="person" required>
+        <option value="" disabled ${!f.person ? 'selected' : ''}>Choose…</option>
+        ${S.roster.map((pp) => `<option ${pp === f.person ? 'selected' : ''}>${esc(pp)}</option>`).join('')}
+        ${f.person && !S.roster.includes(f.person) ? `<option selected>${esc(f.person)}</option>` : ''}
+      </select></div>
+      <div class="field"><label>Quote value (AUD, ex-GST)</label><input name="value" value="${esc(f.value)}" required inputmode="decimal" placeholder="e.g. 4500.00"></div>
+      <div class="field"><label>GP% (optional)</label><input name="gp_pct" value="${esc(f.gp_pct)}" inputmode="decimal" placeholder="e.g. 45"></div>
+      <div class="field" style="grid-column:1/-1"><label>Notes / follow-ups</label>
+        <textarea name="notes" rows="3" style="font:inherit;width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:5px;background:#FFFDF8">${esc(f.notes)}</textarea>
+        <div class="hint">The follow-up log — e.g. "LN 30.07 sent quote | 05.08 followed up".</div></div>
+    </div>
+    <div class="actions"><button class="btn accent" type="submit">${editing ? 'Save changes' : 'Add quote'}</button>
+      <a class="btn secondary" href="#/pipeline">Cancel</a></div></form>`;
+
+    $('#quoteform').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const fd = Object.fromEntries(new FormData(ev.target).entries());
+      const errs = [];
+      if (!isRealDate(fd.quote_date)) errs.push('A valid quote date is required.');
+      if (!String(fd.customer).trim()) errs.push('Customer is required.');
+      if (!fd.person) errs.push('Pick a salesperson.');
+      const cleaned = String(fd.value).trim().replace(/[$,\s]/g, '');
+      if (!/^\d+(\.\d{1,2})?$/.test(cleaned)) errs.push('Quote value must be a positive amount (ex-GST).');
+      const gpS = String(fd.gp_pct ?? '').trim().replace(/%$/, '');
+      let gp = null;
+      if (gpS !== '') {
+        const n = Number(gpS);
+        if (!Number.isFinite(n) || n < 0 || n > 100) errs.push('GP% must be between 0 and 100.');
+        else gp = n <= 1 ? n : n / 100;
+      }
+      if (errs.length) { $('#qmsg').innerHTML = `<div class="errors"><ul>${errs.map((e2) => `<li>${esc(e2)}</li>`).join('')}</ul></div>`; return; }
+      const fields = {
+        quote_ref: String(fd.quote_ref).trim() || null, quote_date: fd.quote_date,
+        customer: String(fd.customer).trim(), person: fd.person,
+        value_cents: Math.round(parseFloat(cleaned) * 100), gp_pct: gp, notes: String(fd.notes ?? '').trim() || null,
+      };
+      try {
+        if (editing) await db.updateQuote(editId, fields, `web:${fields.person}`);
+        else await db.createQuote({ ...fields, status: 'open' }, `web:${fields.person}`);
+        await reload();
+        go('pipeline');
+      } catch (err) { $('#qmsg').innerHTML = `<div class="errors">Could not save: ${esc(err.message)}</div>`; }
+    });
+    if (editing) {
+      $('#delquote').addEventListener('click', async () => {
+        if (!confirm(`Delete quote "${existing.customer}" entirely? (Use Lost/Withdrawn for real outcomes — delete is for mistakes.)`)) return;
+        try { await db.softDeleteQuote(editId, `web:${existing.person}`); await reload(); go('pipeline'); }
+        catch (err) { alert(err.message); }
+      });
+    }
+  }
+
   // ---------- boot ----------
   async function reload() {
-    const data = await db.loadAll();
+    const [data, quotes] = await Promise.all([db.loadAll(), db.loadQuotes()]);
     S = {
       entries: data.entries,
       targets: data.targets,
       roster: data.roster,
       holidaySet: new Set(data.holidays.map((h) => h.date)),
       fyMonths: p.fyMonthsFrom(C.FY_START),
+      quotes,
     };
   }
 
@@ -618,6 +853,9 @@
     const { path, q } = hashParts();
     if (path === 'entries') renderEntries(q);
     else if (path === 'reporting') renderReporting(q);
+    else if (path === 'pipeline') renderPipeline(q);
+    else if (path === 'quote-new') renderQuoteForm(q);
+    else if (path.startsWith('quote-edit/')) renderQuoteForm(q, Number(path.slice(11)));
     else if (path === 'new') renderForm(q);
     else if (path.startsWith('edit/')) renderForm(q, Number(path.slice(5)));
     else renderDashboard(q);

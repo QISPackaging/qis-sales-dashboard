@@ -104,8 +104,57 @@
     audit('delete', id, actor, null);
   }
 
+  // ---- pipeline quotes (sd_quotes) ----
+  let quotesUnavailable = false;
+  async function loadQuotes() {
+    try {
+      const rows = await sb(`${P}quotes?deleted_at=is.null&order=quote_date.asc,id.asc&select=*`);
+      quotesUnavailable = false;
+      return rows.map((r) => ({
+        id: r.id, quote_ref: r.quote_ref, quote_date: r.quote_date, customer: r.customer,
+        person: r.person, value_cents: Number(r.value_cents),
+        gp_pct: r.gp_pct == null ? null : Number(r.gp_pct),
+        status: r.status, loss_reason: r.loss_reason, status_date: r.status_date,
+        notes: r.notes ?? '', won_entry_id: r.won_entry_id,
+      }));
+    } catch (err) {
+      console.warn('quotes unavailable:', err.message);
+      quotesUnavailable = true;
+      return [];
+    }
+  }
+  async function quoteAudit(action, id, actor, detail) {
+    try {
+      await sb(`${P}audit`, { method: 'POST', body: JSON.stringify({ entity: 'sd_quotes', entity_id: id, action, actor, detail }) });
+    } catch { /* best effort */ }
+  }
+  async function createQuote(fields, actor) {
+    guardWrite();
+    const rows = await sb(`${P}quotes`, { method: 'POST', body: JSON.stringify({ ...fields, created_by: actor }) });
+    quoteAudit('create', rows[0].id, actor, fields);
+    return rows[0].id;
+  }
+  async function updateQuote(id, fields, actor) {
+    guardWrite();
+    await sb(`${P}quotes?id=eq.${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ ...fields, updated_by: actor, updated_at: new Date().toISOString() }),
+    });
+    quoteAudit('update', id, actor, fields);
+  }
+  async function softDeleteQuote(id, actor) {
+    guardWrite();
+    await sb(`${P}quotes?id=eq.${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ deleted_by: actor, deleted_at: new Date().toISOString() }),
+    });
+    quoteAudit('delete', id, actor, null);
+  }
+
   window.QIS_DB = {
     loadAll, createEntry, updateEntry, softDelete,
+    loadQuotes, createQuote, updateQuote, softDeleteQuote,
+    quotesUnavailable: () => quotesUnavailable,
     isDemo: () => demoMode,
   };
 })();

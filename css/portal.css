@@ -202,3 +202,34 @@ footer{margin-top:44px;border-top:1px solid var(--line);padding-top:14px;
 .chip.pend{background:var(--warn-bg);color:var(--warn)}
 .muted{color:var(--ink-soft)}
 @media (max-width:520px){ .barrow{grid-template-columns:110px 1fr;gap:6px} .barrow .barval{grid-column:2;text-align:left} }
+
+/* ---- pipeline tab ---- */
+.tile.alert{border-color:var(--bad);background:#FDF6F5}
+.tile.alert .v{color:var(--bad)}
+.agerow{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-top:4px}
+.abucket{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:10px 13px;text-decoration:none;color:var(--ink);display:block}
+.abucket:hover{border-color:var(--ink)}
+.abucket.onb{outline:2px solid var(--ink)}
+.abucket .lbl{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-soft);font-weight:600}
+.abucket .amt{font-size:17px;font-weight:600;margin-top:2px}
+.abucket .ct{font-size:11.5px;color:var(--ink-soft)}
+.abucket.b1{border-top:3px solid var(--good)}
+.abucket.b2{border-top:3px solid #6f9f3f}
+.abucket.b3{border-top:3px solid var(--warn)}
+.abucket.b4{border-top:3px solid var(--bad);background:#FDF6F5}
+.age{font-size:11.5px;font-weight:700;padding:2px 9px;border-radius:99px;white-space:nowrap}
+.age.a1{background:var(--good-bg);color:var(--good)}
+.age.a2{background:#EAF2DC;color:#5c7a33}
+.age.a3{background:var(--warn-bg);color:var(--warn)}
+.age.a4{background:var(--bad-bg);color:var(--bad)}
+.btn.won{background:var(--good);color:#fff}
+.btn.lost{background:transparent;color:var(--bad);border:1px solid var(--bad)}
+.btn.wd{background:transparent;color:var(--ink-soft);border:1px solid var(--line)}
+.rowactions{white-space:nowrap;display:flex;gap:6px;justify-content:flex-end}
+.reason{background:var(--warn-bg);border:1px solid #E8D9A8;border-radius:6px;padding:7px 10px;font-size:12.5px;color:var(--warn);white-space:nowrap}
+.reason select{font:inherit;font-size:12.5px;padding:3px 6px;border:1px solid var(--line);border-radius:4px;background:#fff;margin:0 5px}
+.flow{background:var(--good-bg);border:1px solid #BFDCCB;border-radius:6px;padding:10px 13px;font-size:13px;color:#174F35;margin-top:12px}
+.flow b{color:#0F3A26}
+.pill{font-size:11px;font-weight:600;padding:2px 8px;border-radius:99px;background:var(--bad-bg);color:var(--bad)}
+.qnote{max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--ink-soft)}
+.hintline{font-size:12px;color:var(--ink-soft);align-self:center;padding-top:12px}
