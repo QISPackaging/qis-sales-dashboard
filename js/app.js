@@ -522,7 +522,7 @@
           const newId = await db.createEntry(parsed.value, `web:${parsed.value.person}`);
           if (fromQuote) {
             // the Won flow: the quote is marked won only once the sale is saved
-            await db.updateQuote(fromQuote, { status: 'won', status_date: parsed.value.entry_date, won_entry_id: newId }, `web:${parsed.value.person}`);
+            await db.updateQuote(fromQuote, { status: 'won', status_date: parsed.value.entry_date, won_entry_id: newId, loss_reason: null }, `web:${parsed.value.person}`);
           }
         }
         await reload();
@@ -709,7 +709,7 @@
     <h2>${status === 'all' ? 'All quotes' : status[0].toUpperCase() + status.slice(1) + ' quotes'} — ${rows.length}</h2>
     <div class="panel scroll"><table>
       <tr><th class="tight">Quote #</th><th class="tight">Quoted</th><th class="tight">Age</th><th class="left">Customer</th><th class="tight">Person</th><th class="tight">Value</th><th class="left">Notes / follow-ups</th>
-        ${isOpenView ? '<th class="tight" style="text-align:left">Status</th>' : status === 'lost' ? '<th class="left">Reason</th><th>Lost on</th>' : '<th>Status</th><th>On</th>'}</tr>
+        ${isOpenView ? '<th class="tight" style="text-align:left">Status</th>' : status === 'lost' ? '<th class="left">Reason</th><th class="tight">Lost on</th><th class="tight">Came back?</th>' : '<th>Status</th><th class="tight">On</th><th class="tight"></th>'}</tr>
       ${rows.map((x) => {
         const d = aged(x); const bk = bucketOf(d);
         const base = `<td class="num left tight">${esc(x.quote_ref ?? '')}</td><td class="num tight">${ddmmyy(x.quote_date)}</td>
@@ -729,8 +729,10 @@
               </select>`;
           return `<tr>${base}<td>${actions}</td></tr>`;
         }
-        if (status === 'lost') return `<tr>${base}<td class="left">${x.loss_reason ? `<span class="pill">${esc(x.loss_reason)}</span>` : '<span class="muted">no reason recorded</span>'}</td><td class="num">${x.status_date ? ddmmyyyy(x.status_date) : '—'}</td></tr>`;
-        return `<tr>${base}<td>${esc(x.status)}</td><td class="num">${x.status_date ? ddmmyyyy(x.status_date) : '—'}</td></tr>`;
+        const revive = x.status === 'open' ? '' : `<select class="src-select qrevive" data-id="${x.id}">
+          <option value="" selected>—</option><option value="won">Won ✓ — convert it</option><option value="reopen">Reopen to pipeline</option></select>`;
+        if (status === 'lost') return `<tr>${base}<td class="left">${x.loss_reason ? `<span class="pill">${esc(x.loss_reason)}</span>` : '<span class="muted">no reason recorded</span>'}</td><td class="num">${x.status_date ? ddmmyy(x.status_date) : '—'}</td><td>${revive}</td></tr>`;
+        return `<tr>${base}<td>${esc(x.status)}</td><td class="num">${x.status_date ? ddmmyy(x.status_date) : '—'}</td><td>${revive}</td></tr>`;
       }).join('')}
       ${rows.length === 0 ? '<tr><td colspan="9" class="left" style="color:var(--ink-soft)">No quotes match this filter.</td></tr>' : ''}
       ${rows.length ? `<tr class="team"><td></td><td>TOTAL</td><td></td><td class="left">${rows.length} quotes</td><td></td><td class="num">${fmt$(sumV(rows))}</td><td></td>${isOpenView ? '<td></td>' : '<td></td><td></td>'}</tr>` : ''}
@@ -768,6 +770,24 @@
       }
     }));
     document.querySelectorAll('.cancel-lost').forEach((b) => b.addEventListener('click', () => { lostPendingId = null; renderPipeline(q); }));
+    document.querySelectorAll('.qrevive').forEach((sel) => sel.addEventListener('change', async () => {
+      const x = S.quotes.find((z) => z.id === Number(sel.dataset.id));
+      const choice = sel.value;
+      sel.value = '';
+      if (choice === 'won') {
+        go('new', { from_quote: x.id, person: S.roster.includes(x.person) ? x.person : '', customer: x.customer,
+          order_ref: x.quote_ref ?? '', revenue: (x.value_cents / 100).toFixed(2), gp: x.gp_pct == null ? '' : (x.gp_pct * 100).toFixed(1) });
+      } else if (choice === 'reopen') {
+        if (!confirm(`Reopen "${x.customer}" (${fmt$(x.value_cents / 100)})? It returns to the open pipeline with today as its quote date.`)) return;
+        const stamp = `Reopened ${asOf.slice(8, 10)}.${asOf.slice(5, 7)}${x.loss_reason ? ` (was lost: ${x.loss_reason})` : x.status === 'withdrawn' ? ' (was withdrawn)' : ''}`;
+        const notes = x.notes ? `${x.notes} | ${stamp}` : stamp;
+        try {
+          await db.updateQuote(x.id, { status: 'open', quote_date: asOf, status_date: null, loss_reason: null, notes }, `web:${x.person}`);
+          x.status = 'open'; x.quote_date = asOf; x.status_date = null; x.loss_reason = null; x.notes = notes;
+          renderPipeline(q);
+        } catch (err) { alert(err.message); }
+      }
+    }));
     document.querySelectorAll('.confirm-lost').forEach((b) => b.addEventListener('click', async () => {
       const id = Number(b.dataset.id);
       const reason = document.querySelector(`#lr-${id}`).value;
