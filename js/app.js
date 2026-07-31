@@ -729,29 +729,30 @@
             <option value="" ${!x.lead_source ? 'selected' : ''}>—</option>
             ${LEAD_SOURCES.map((s2) => `<option ${x.lead_source === s2 ? 'selected' : ''}>${esc(s2)}</option>`).join('')}
           </select></td>${noteCell(x)}`;
+        const actions = lostPendingId === x.id
+          ? `<div class="reason">Why lost? <select id="lr-${x.id}">${LOSS_REASONS.map((r2) => `<option>${r2}</option>`).join('')}</select>
+              <button class="btn lost confirm-lost" data-id="${x.id}" style="background:var(--bad);color:#fff;border:none">Confirm</button>
+              <button class="btn wd cancel-lost">Cancel</button></div>`
+          : `<select class="src-select qstatus" data-id="${x.id}">
+              <option value="" selected>Open</option>
+              <option value="won">Won ✓</option>
+              <option value="lost">Lost…</option>
+              <option value="withdrawn">Withdrawn</option>
+              <option value="reissued">Reissued — reset age</option>
+            </select>`;
         if (isOpenView) {
-          const actions = lostPendingId === x.id
-            ? `<div class="reason">Why lost? <select id="lr-${x.id}">${LOSS_REASONS.map((r2) => `<option>${r2}</option>`).join('')}</select>
-                <button class="btn lost confirm-lost" data-id="${x.id}" style="background:var(--bad);color:#fff;border:none">Confirm</button>
-                <button class="btn wd cancel-lost">Cancel</button></div>`
-            : `<select class="src-select qstatus" data-id="${x.id}">
-                <option value="" selected>Open</option>
-                <option value="won">Won ✓</option>
-                <option value="lost">Lost…</option>
-                <option value="withdrawn">Withdrawn</option>
-                <option value="reissued">Reissued — reset age</option>
-              </select>`;
           return `<tr>${base}<td>${actions}</td></tr>`;
         }
-        const revive = x.status === 'open' ? '' : `<select class="src-select qrevive" data-id="${x.id}">
-          <option value="" selected>—</option><option value="won">Won ✓ — convert it</option><option value="reopen">Reopen to pipeline</option></select>`;
+        // open quotes outside the Open view keep the status dropdown (or the pending loss prompt)
+        const revive = x.status === 'open' ? actions : `<select class="src-select qrevive" data-id="${x.id}">
+          <option value="" selected>—</option>${x.status === 'won' ? '' : '<option value="won">Won ✓ — convert it</option>'}<option value="reopen">Reopen to pipeline</option></select>`;
         if (status === 'lost') return `<tr>${base}<td class="left"><select class="src-select qreason" data-id="${x.id}" style="max-width:150px">
           <option value="" ${!x.loss_reason ? 'selected' : ''}>no reason — set one</option>
           ${LOSS_REASONS.map((r2) => `<option ${x.loss_reason === r2 ? 'selected' : ''}>${esc(r2)}</option>`).join('')}
         </select></td><td class="num">${x.status_date ? ddmmyy(x.status_date) : '—'}</td><td>${revive}</td></tr>`;
         return `<tr>${base}<td>${esc(x.status)}</td><td class="num">${x.status_date ? ddmmyy(x.status_date) : '—'}</td><td>${revive}</td></tr>`;
       }).join('')}
-      ${rows.length === 0 ? '<tr><td colspan="11" class="left" style="color:var(--ink-soft)">No quotes match this filter.</td></tr>' : ''}
+      ${rows.length === 0 ? `<tr><td colspan="${isOpenView ? 9 : 11}" class="left" style="color:var(--ink-soft)">No quotes match this filter.</td></tr>` : ''}
       ${rows.length ? `<tr class="team"><td></td><td>TOTAL</td><td></td><td class="left">${rows.length} quotes</td><td></td><td class="num">${fmt$(sumV(rows))}</td><td></td><td></td>${isOpenView ? '<td></td>' : '<td></td><td></td><td></td>'}</tr>` : ''}
     </table>
     ${isOpenView ? '<div class="flow">Change a quote’s <b>Status</b> from the dropdown: <b>Won</b> opens “Log a sale” pre-filled (marked won when the sale saves) · <b>Lost</b> asks for a reason · <b>Withdrawn</b> = customer cancelled · <b>Reissued</b> resets its age to today.</div>' : ''}
@@ -923,6 +924,7 @@
 
   async function route() {
     if (!S) await reload();
+    lostPendingId = null; // any navigation or filter change abandons a half-finished Lost prompt
     const { path, q } = hashParts();
     if (path === 'entries') renderEntries(q);
     else if (path === 'reporting') renderReporting(q);
