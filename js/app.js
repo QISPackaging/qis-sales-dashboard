@@ -651,7 +651,7 @@
     const status = ['open', 'won', 'lost', 'withdrawn', 'all'].includes(q.get('status')) ? q.get('status') : 'open';
     const personFilter = q.get('person') || '';
     const ageFilter = q.get('age') || '';
-    const sort = ['oldest', 'newest', 'value'].includes(q.get('sort')) ? q.get('sort') : 'oldest';
+    const sort = ['oldest', 'newest', 'value'].includes(q.get('sort')) ? q.get('sort') : 'newest';
     const search = (q.get('find') || '').trim();
     const monthFilter = /^\d{4}-\d{2}$/.test(q.get('month') || '') ? q.get('month') : '';
     const params = (over) => ({ status, person: personFilter, age: ageFilter, sort, find: search, month: monthFilter, ...over });
