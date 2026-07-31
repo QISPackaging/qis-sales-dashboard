@@ -745,7 +745,10 @@
         }
         const revive = x.status === 'open' ? '' : `<select class="src-select qrevive" data-id="${x.id}">
           <option value="" selected>—</option><option value="won">Won ✓ — convert it</option><option value="reopen">Reopen to pipeline</option></select>`;
-        if (status === 'lost') return `<tr>${base}<td class="left">${x.loss_reason ? `<span class="pill">${esc(x.loss_reason)}</span>` : '<span class="muted">no reason recorded</span>'}</td><td class="num">${x.status_date ? ddmmyy(x.status_date) : '—'}</td><td>${revive}</td></tr>`;
+        if (status === 'lost') return `<tr>${base}<td class="left"><select class="src-select qreason" data-id="${x.id}" style="max-width:150px">
+          <option value="" ${!x.loss_reason ? 'selected' : ''}>no reason — set one</option>
+          ${LOSS_REASONS.map((r2) => `<option ${x.loss_reason === r2 ? 'selected' : ''}>${esc(r2)}</option>`).join('')}
+        </select></td><td class="num">${x.status_date ? ddmmyy(x.status_date) : '—'}</td><td>${revive}</td></tr>`;
         return `<tr>${base}<td>${esc(x.status)}</td><td class="num">${x.status_date ? ddmmyy(x.status_date) : '—'}</td><td>${revive}</td></tr>`;
       }).join('')}
       ${rows.length === 0 ? '<tr><td colspan="11" class="left" style="color:var(--ink-soft)">No quotes match this filter.</td></tr>' : ''}
@@ -785,6 +788,12 @@
           x.quote_date = asOf; x.notes = notes; renderPipeline(q);
         } catch (err) { alert(err.message); }
       }
+    }));
+    document.querySelectorAll('.qreason').forEach((sel) => sel.addEventListener('change', async () => {
+      const x = S.quotes.find((z) => z.id === Number(sel.dataset.id));
+      const val = sel.value || null;
+      try { await db.updateQuote(x.id, { loss_reason: val }, `web:${x.person}`); x.loss_reason = val; }
+      catch (err) { alert(err.message); sel.value = x.loss_reason ?? ''; }
     }));
     document.querySelectorAll('.qsrc').forEach((sel) => sel.addEventListener('change', async () => {
       const x = S.quotes.find((z) => z.id === Number(sel.dataset.id));
