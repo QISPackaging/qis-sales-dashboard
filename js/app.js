@@ -252,7 +252,7 @@
       <div><label>Month</label><select name="month">${monthOptions}</select></div>
       <div><label>Day</label><input type="date" name="day" value="${M.selDay}"></div>
       <div><label>Week of</label><input type="date" name="week" value="${M.weekAnchor}"></div>
-      <button class="btn small" type="submit">View</button>
+      <div style="align-self:center;color:var(--ink-soft);font-size:12px;padding-top:14px">updates as you pick</div>
     </form>
     <div class="pulse">
       <div><div class="k">Month so far</div><div class="v num">${fmt$(T.actual)}</div><div class="s num">of ${fmt$(T.target)} target</div></div>
@@ -299,10 +299,25 @@
       <div><b>Logging sales</b> — use “Log a sale” in the menu; the dashboard updates when an entry is saved.</div>
     </footer>`;
 
-    $('#selform').addEventListener('submit', (ev) => {
-      ev.preventDefault();
-      const f = new FormData(ev.target);
-      go('dashboard', { month: f.get('month'), day: f.get('day'), week: f.get('week') });
+    // Selectors apply the moment they change — no "View" click needed. Picking a
+    // different month also snaps the Day/Week panels into that month so the lower
+    // blocks never lag behind the month being viewed.
+    const selForm = $('#selform');
+    selForm.addEventListener('submit', (ev) => ev.preventDefault());
+    selForm.querySelector('[name=month]').addEventListener('change', (ev) => {
+      const m = ev.target.value;
+      const def = m === M.currentMonth ? M.asOf : `${m}-01`;
+      go('dashboard', {
+        month: m,
+        day: M.selDay.slice(0, 7) === m ? M.selDay : def,
+        week: M.weekAnchor.slice(0, 7) === m ? M.weekAnchor : def,
+      });
+    });
+    selForm.querySelector('[name=day]').addEventListener('change', (ev) => {
+      if (ev.target.value) go('dashboard', { month: M.selMonth, day: ev.target.value, week: M.weekAnchor });
+    });
+    selForm.querySelector('[name=week]').addEventListener('change', (ev) => {
+      if (ev.target.value) go('dashboard', { month: M.selMonth, day: M.selDay, week: ev.target.value });
     });
 
     const paceTable = (el, rows, head) => {
