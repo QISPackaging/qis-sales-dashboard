@@ -239,3 +239,11 @@ th.tight,td.tight{width:1%;white-space:nowrap}
 #qtip{display:none;position:fixed;z-index:60;background:var(--ink);color:#F7F5F0;border-radius:6px;
   padding:10px 13px;font-size:12.5px;line-height:1.5;width:380px;max-width:78vw;white-space:normal;
   box-shadow:0 8px 22px rgba(0,0,0,.22);pointer-events:none}
+
+/* ---- in-page confirmation (replaces native confirm dialogs) ---- */
+.modal-backdrop{position:fixed;inset:0;background:rgba(34,49,74,.45);display:flex;align-items:center;
+  justify-content:center;padding:20px;z-index:1000}
+.modal{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:20px 22px;
+  max-width:440px;width:100%;box-shadow:0 12px 40px rgba(34,49,74,.25)}
+.modal-msg{margin:0 0 18px;font-size:14.5px;line-height:1.5}
+.modal-actions{display:flex;gap:10px;justify-content:flex-end}

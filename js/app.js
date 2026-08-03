@@ -36,6 +36,32 @@
   const fmt$2 = (v) => '$' + v.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const pct = (v) => (v >= 0 ? '+' : '−') + Math.abs(v * 100).toFixed(1) + '%';
   const stateOf = (vp) => (vp >= 0 ? 'good' : vp >= -0.15 ? 'warn' : 'bad');
+
+  // In-page confirmation. Native confirm() is unreliable — browsers let a user
+  // suppress dialogs ("prevent additional dialogs"), after which it silently
+  // returns false and the action does nothing with no feedback.
+  function askConfirm(message, okLabel = 'Yes, continue') {
+    return new Promise((resolve) => {
+      const wrap = document.createElement('div');
+      wrap.className = 'modal-backdrop';
+      wrap.innerHTML = `<div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-msg">
+        <p class="modal-msg" id="modal-msg"></p>
+        <div class="modal-actions">
+          <button class="btn secondary" data-no type="button">Cancel</button>
+          <button class="btn accent" data-yes type="button"></button>
+        </div></div>`;
+      wrap.querySelector('.modal-msg').textContent = message;
+      wrap.querySelector('[data-yes]').textContent = okLabel;
+      const done = (v) => { document.removeEventListener('keydown', onKey); wrap.remove(); resolve(v); };
+      const onKey = (ev) => { if (ev.key === 'Escape') done(false); else if (ev.key === 'Enter') done(true); };
+      wrap.querySelector('[data-yes]').addEventListener('click', () => done(true));
+      wrap.querySelector('[data-no]').addEventListener('click', () => done(false));
+      wrap.addEventListener('click', (ev) => { if (ev.target === wrap) done(false); });
+      document.addEventListener('keydown', onKey);
+      document.body.appendChild(wrap);
+      wrap.querySelector('[data-yes]').focus();
+    });
+  }
   const ddmm = (iso) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
   const ddmmyyyy = (iso) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
   const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -460,7 +486,7 @@
       btn.addEventListener('click', async () => {
         const id = Number(btn.dataset.del);
         const entry = S.entries.find((e) => e.id === id);
-        if (!confirm(`Delete this entry? (${entry.person} — ${entry.customer} — ${fmt$2(entry.revenue_cents / 100)})`)) return;
+        if (!await askConfirm(`Delete this entry? (${entry.person} — ${entry.customer} — ${fmt$2(entry.revenue_cents / 100)})`, 'Delete entry')) return;
         try {
           await db.softDelete(id, `web:${entry.person}`);
           S.entries = S.entries.filter((e) => e.id !== id);
@@ -790,13 +816,13 @@
       } else if (choice === 'lost') {
         lostPendingId = x.id; renderPipeline(q);
       } else if (choice === 'withdrawn') {
-        if (!confirm(`Mark "${x.customer}" (${fmt$(x.value_cents / 100)}) as withdrawn?`)) return;
+        if (!await askConfirm(`Mark "${x.customer}" (${fmt$(x.value_cents / 100)}) as withdrawn?`, 'Mark withdrawn')) return;
         try {
           await db.updateQuote(x.id, { status: 'withdrawn', status_date: asOf }, `web:${x.person}`);
           x.status = 'withdrawn'; x.status_date = asOf; renderPipeline(q);
         } catch (err) { alert(err.message); }
       } else if (choice === 'reissued') {
-        if (!confirm(`Reissued "${x.customer}"? This resets its age — quote date becomes today.`)) return;
+        if (!await askConfirm(`Reissued "${x.customer}"? This resets its age — quote date becomes today.`, 'Reissue')) return;
         const stamp = `Reissued ${asOf.slice(8, 10)}.${asOf.slice(5, 7)}`;
         const notes = x.notes ? `${x.notes} | ${stamp}` : stamp;
         try {
@@ -826,7 +852,7 @@
         go('new', { from_quote: x.id, person: S.roster.includes(x.person) ? x.person : '', customer: x.customer,
           order_ref: x.quote_ref ?? '', revenue: (x.value_cents / 100).toFixed(2), gp: x.gp_pct == null ? '' : (x.gp_pct * 100).toFixed(1), lead: x.lead_source ?? '' });
       } else if (choice === 'reopen') {
-        if (!confirm(`Reopen "${x.customer}" (${fmt$(x.value_cents / 100)})? It returns to the open pipeline with today as its quote date.`)) return;
+        if (!await askConfirm(`Reopen "${x.customer}" (${fmt$(x.value_cents / 100)})? It returns to the open pipeline with today as its quote date.`, 'Reopen')) return;
         const stamp = `Reopened ${asOf.slice(8, 10)}.${asOf.slice(5, 7)}${x.loss_reason ? ` (was lost: ${x.loss_reason})` : x.status === 'withdrawn' ? ' (was withdrawn)' : ''}`;
         const notes = x.notes ? `${x.notes} | ${stamp}` : stamp;
         try {
@@ -917,7 +943,7 @@
     });
     if (editing) {
       $('#delquote').addEventListener('click', async () => {
-        if (!confirm(`Delete quote "${existing.customer}" entirely? (Use Lost/Withdrawn for real outcomes — delete is for mistakes.)`)) return;
+        if (!await askConfirm(`Delete quote "${existing.customer}" entirely? (Use Lost/Withdrawn for real outcomes — delete is for mistakes.)`, 'Delete quote')) return;
         try { await db.softDeleteQuote(editId, `web:${existing.person}`); await reload(); go('pipeline'); }
         catch (err) { alert(err.message); }
       });
