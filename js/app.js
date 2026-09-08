@@ -758,15 +758,15 @@
       <span class="hintline">Filters are yours alone</span>
     </div>
     <h2>${status === 'all' ? 'All quotes' : status[0].toUpperCase() + status.slice(1) + ' quotes'} — ${rows.length}</h2>
-    <div class="panel scroll"><table>
-      <tr><th class="tight">Quote #</th><th class="tight">Quoted</th><th class="tight">Age</th><th class="left">Customer</th><th class="tight">Person</th><th class="tight">Value</th><th class="tight">Source</th><th class="left">Notes / follow-ups</th>
+    <div class="panel scroll"><table class="pipe">
+      <tr><th class="tight">#</th><th class="tight">Quoted</th><th class="tight">Age</th><th class="left">Customer</th><th class="tight">Person</th><th class="tight">Value</th><th class="tight">Source</th><th class="left">Notes</th>
         ${isOpenView ? '<th class="tight" style="text-align:left">Status</th>' : status === 'lost' ? '<th class="left">Reason</th><th class="tight">Lost on</th><th class="tight">Came back?</th>' : '<th>Status</th><th class="tight">On</th><th class="tight"></th>'}</tr>
       ${rows.map((x) => {
         const d = aged(x); const bk = bucketOf(d);
         const base = `<td class="num left tight">${esc(x.quote_ref ?? '')}</td><td class="num tight">${ddmmyy(x.quote_date)}</td>
           <td class="tight"><span class="age ${bk.chip}">${d} days</span></td><td class="left">${esc(x.customer)}</td><td class="tight">${esc(x.person)}</td>
           <td class="num tight">${fmt$(x.value_cents / 100)}</td>
-          <td class="tight"><select class="src-select qsrc" data-id="${x.id}" style="max-width:130px">
+          <td class="tight"><select class="src-select qsrc" data-id="${x.id}" style="max-width:110px">
             <option value="" ${!x.lead_source ? 'selected' : ''}>—</option>
             ${LEAD_SOURCES.map((s2) => `<option ${x.lead_source === s2 ? 'selected' : ''}>${esc(s2)}</option>`).join('')}
           </select></td>${noteCell(x)}`;
@@ -779,7 +779,7 @@
               <option value="won">Won ✓</option>
               <option value="lost">Lost…</option>
               <option value="withdrawn">Withdrawn</option>
-              <option value="reissued">Reissued — reset age</option>
+              <option value="reissued">Reissued</option>
             </select>`;
         if (isOpenView) {
           return `<tr>${base}<td>${actions}</td></tr>`;
@@ -787,7 +787,7 @@
         // open quotes outside the Open view keep the status dropdown (or the pending loss prompt)
         const revive = x.status === 'open' ? actions : `<select class="src-select qrevive" data-id="${x.id}">
           <option value="" selected>—</option>${x.status === 'won' ? '' : '<option value="won">Won ✓ — convert it</option>'}<option value="reopen">Reopen to pipeline</option></select>`;
-        if (status === 'lost') return `<tr>${base}<td class="left"><select class="src-select qreason" data-id="${x.id}" style="max-width:150px">
+        if (status === 'lost') return `<tr>${base}<td class="left"><select class="src-select qreason" data-id="${x.id}" style="max-width:120px">
           <option value="" ${!x.loss_reason ? 'selected' : ''}>no reason — set one</option>
           ${LOSS_REASONS.map((r2) => `<option ${x.loss_reason === r2 ? 'selected' : ''}>${esc(r2)}</option>`).join('')}
         </select></td><td class="num">${x.status_date ? ddmmyy(x.status_date) : '—'}</td><td>${revive}</td></tr>`;

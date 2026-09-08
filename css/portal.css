@@ -236,6 +236,11 @@ footer{margin-top:44px;border-top:1px solid var(--line);padding-top:14px;
 
 /* pipeline polish: tight columns + note hover tooltip */
 th.tight,td.tight{width:1%;white-space:nowrap}
+/* pipeline table fits the container — no horizontal scroll */
+.pipe{font-size:12.5px}
+.pipe th,.pipe td{padding:6px 7px}
+.pipe .src-select{max-width:118px}
+.pipe .qnote{max-width:150px}
 #qtip{display:none;position:fixed;z-index:60;background:var(--ink);color:#F7F5F0;border-radius:6px;
   padding:10px 13px;font-size:12.5px;line-height:1.5;width:380px;max-width:78vw;white-space:normal;
   box-shadow:0 8px 22px rgba(0,0,0,.22);pointer-events:none}
