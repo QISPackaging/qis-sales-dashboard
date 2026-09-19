@@ -8,11 +8,12 @@
   const TEAM_WIN = 'Team Win';
   const LEAD_SOURCES = [
     'In Bound Email', 'In Bound Call', 'In Bound Order/PO', 'Pop Up Form',
-    'Online form Submission', 'Facebook lead', 'Liam N Outbound', 'Jack N Outbound',
+    'Online form Submission', 'Facebook lead', 'LinkedIn Lead', 'Live Chat', 'Showroom',
+    'Liam N Outbound', 'Jack N Outbound',
     'Luke H Outbound', 'Allegra Outbound',
   ];
   const PENDING = 'Pending Source';
-  const INBOUND = new Set(['In Bound Email', 'In Bound Call', 'In Bound Order/PO', 'Pop Up Form', 'Online form Submission', 'Facebook lead']);
+  const INBOUND = new Set(['In Bound Email', 'In Bound Call', 'In Bound Order/PO', 'Pop Up Form', 'Online form Submission', 'Facebook lead', 'LinkedIn Lead', 'Live Chat', 'Showroom']);
   const OUTBOUND = new Set(['Liam N Outbound', 'Jack N Outbound', 'Luke H Outbound', 'Allegra Outbound']);
   const sourceType = (src) => (INBOUND.has(src) ? 'in' : OUTBOUND.has(src) ? 'out' : 'pend');
   const LOSS_REASONS = ['Price too high', 'Chose a competitor', 'No response / went quiet',
